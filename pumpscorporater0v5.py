@@ -543,12 +543,23 @@ if st.session_state.get("authentication_status"):
             st.pyplot(fig_curvas)
             plt.close(fig_curvas)
             st.divider()
-            eficiencia_bomba_curve = np.clip(func_curva_eficiencia(vazao_range) / 100, 0.01, 1.0)
+            
+            # --- Início do Bloco Corrigido ---
+            # Dados da Curva de Potência
+            eficiencia_bomba_curve = func_curva_eficiencia(vazao_range) / 100
+            # Onde a eficiência extrapolada for irreal (menor ou igual a 1%), substituímos por 'NaN'
+            eficiencia_bomba_curve[eficiencia_bomba_curve <= 0.01] = np.nan
+            # Agora calculamos a potência. Onde a eficiência for NaN, a potência também será NaN e não será plotada.
             potencia_eletrica_kw_curve = (vazao_range / 3600 * rho_selecionado * 9.81 * altura_bomba_curve) / (eficiencia_bomba_curve * (rend_motor / 100)) / 1000
+
+            # Dados da Curva de NPSH
             npshr_curve = func_curva_npshr(vazao_range)
             perdas_succao_curve = np.array([calcular_perda_serie(sistema_succao_atual, q, st.session_state.fluido_selecionado, materiais_combinados, fluidos_combinados) for q in vazao_range])
             npsha_curve = h_superficie_m + st.session_state.h_estatica_succao - perdas_succao_curve - h_vapor_m
+            
+            # --- Layout dos Novos Gráficos ---
             col1, col2 = st.columns(2)
+            
             with col1:
                 st.subheader("🔌 Análise de Potência")
                 fig_potencia, ax_potencia = plt.subplots(figsize=(8, 5))
@@ -558,6 +569,7 @@ if st.session_state.get("authentication_status"):
                 ax_potencia.set_title("Potência Elétrica vs. Vazão"); ax_potencia.set_xlabel("Vazão (m³/h)"); ax_potencia.set_ylabel("Potência Elétrica (kW)"); ax_potencia.legend(); ax_potencia.grid(True); ax_potencia.set_ylim(bottom=0)
                 st.pyplot(fig_potencia)
                 plt.close(fig_potencia)
+
             with col2:
                 st.subheader("⚠️ Análise de Cavitação (NPSH)")
                 fig_npsh, ax_npsh = plt.subplots(figsize=(8, 5))
@@ -569,8 +581,12 @@ if st.session_state.get("authentication_status"):
                 ax_npsh.set_title("NPSH vs. Vazão"); ax_npsh.set_xlabel("Vazão (m³/h)"); ax_npsh.set_ylabel("Altura (m)"); ax_npsh.legend(); ax_npsh.grid(True); ax_npsh.set_ylim(bottom=0)
                 st.pyplot(fig_npsh)
                 plt.close(fig_npsh)
+            # --- Fim do Bloco Corrigido ---
+
             st.divider()
             st.header("📄 Exportar Relatório")
+            # ... (O resto do código continua como antes) ...
+
             params_data = {
                 "Fluido Selecionado": st.session_state.fluido_selecionado, "Altura Estática Total (m)": f"{h_estatica_total:.2f}", "Condição Final": st.session_state.endpoint_type,
             }
@@ -590,7 +606,6 @@ if st.session_state.get("authentication_status"):
             fig_curvas.savefig(chart_buffer, format='PNG', dpi=300, bbox_inches='tight')
             chart_buffer.seek(0)
             network_data_completa = {'succao': sistema_succao_atual, 'recalque': sistema_recalque_atual}
-            # ATENÇÃO: A função generate_report precisará ser atualizada para receber os novos gráficos
             pdf_bytes = generate_report(project_name=st.session_state.get("selected_project", "N/A"), scenario_name=st.session_state.get("selected_scenario", "N/A"), params_data=params_data, results_data=results_data, metrics_data=metrics_data, network_data=network_data_completa, diagram_image_bytes=diagrama_bytes, chart_figure_bytes=chart_buffer.getvalue())
             st.download_button(label="📥 Baixar Relatório em PDF", data=pdf_bytes, file_name=f"Relatorio_{st.session_state.get('selected_project', 'NovoProjeto')}_{st.session_state.get('selected_scenario', 'NovoCenario')}.pdf", mime="application/pdf")
             st.divider()
