@@ -17,7 +17,7 @@ from database import (
     get_scenarios_for_project, delete_scenario, add_user_fluid, get_user_fluids,
     delete_user_fluid, add_user_material, get_user_materials, delete_user_material
 )
-from report_generator import generate_report # Assumindo que este será atualizado para receber os novos gráficos
+from report_generator import generate_report
 
 # --- CONFIGURAÇÕES E CONSTANTES ---
 st.set_page_config(layout="wide", page_title="Análise de Redes Hidráulicas")
@@ -381,7 +381,7 @@ if st.session_state.get("authentication_status"):
                 new_fluid_vapor_pressure = c3f.number_input("Pressão Vapor (kPa)", format="%.2f", min_value=0.0)
                 submitted_fluid = st.form_submit_button("Adicionar Fluido")
                 if submitted_fluid:
-                    if new_fluid_name and new_fluid_density > 0 and new_fluid_viscosity > 0:
+                    if new_fluid_name and new_fluid_density > 0 and new_fluid_viscosity >= 0:
                         if add_user_fluid(username, new_fluid_name, new_fluid_density, new_fluid_viscosity, new_fluid_vapor_pressure):
                             st.success(f"Fluido '{new_fluid_name}' adicionado!")
                             st.rerun()
@@ -530,53 +530,34 @@ if st.session_state.get("authentication_status"):
                  st.warning(f"**Atenção:** Margem de NPSH ({margem_npsh:.2f} m) é baixa. Recomenda-se uma margem de segurança maior para evitar cavitação.")
             st.metric("Custo Anual", f"R$ {resultados_energia['custo_anual']:.2f}")
             st.divider()
-            
-            # --- GERAÇÃO DOS GRÁFICOS ---
             st.header("📈 Gráficos de Análise Operacional")
-            
-            # --- Gráfico Principal: Curva da Bomba vs. Sistema ---
-            fig_curvas, ax_curvas = plt.subplots(figsize=(8, 5))
-            label_ponto_op = f'Ponto de Operação ({vazao_op:.1f} m³/h, {altura_op:.1f} m)'
             max_vazao_curva = st.session_state.curva_altura_df['Vazão (m³/h)'].max()
             max_plot_vazao = max(vazao_op * 1.5, max_vazao_curva * 1.2) if vazao_op else max_vazao_curva * 1.2
             vazao_range = np.linspace(0, max_plot_vazao, 100)
+            fig_curvas, ax_curvas = plt.subplots(figsize=(8, 5))
+            label_ponto_op = f'Ponto de Operação ({vazao_op:.1f} m³/h, {altura_op:.1f} m)'
             altura_bomba_curve = func_curva_bomba(vazao_range)
             altura_sistema_curve = np.array([func_curva_sistema(q) if func_curva_sistema(q) < 1e10 else np.nan for q in vazao_range])
-            ax_curvas.plot(vazao_range, altura_bomba_curve, label='Curva da Bomba', color='royalblue', lw=2)
-            ax_curvas.plot(vazao_range, altura_sistema_curve, label='Curva do Sistema', color='seagreen', lw=2)
-            ax_curvas.scatter(vazao_op, altura_op, color='red', s=100, zorder=5, label=label_ponto_op)
+            ax_curvas.plot(vazao_range, altura_bomba_curve, label='Curva da Bomba', color='royalblue', lw=2); ax_curvas.plot(vazao_range, altura_sistema_curve, label='Curva do Sistema', color='seagreen', lw=2); ax_curvas.scatter(vazao_op, altura_op, color='red', s=100, zorder=5, label=label_ponto_op)
             ax_curvas.set_title("Curva da Bomba vs. Curva do Sistema"); ax_curvas.set_xlabel("Vazão (m³/h)"); ax_curvas.set_ylabel("Altura Manométrica (m)"); ax_curvas.legend(); ax_curvas.grid(True); ax_curvas.set_ylim(bottom=0)
             st.pyplot(fig_curvas)
             plt.close(fig_curvas)
             st.divider()
-
-            # --- Geração dos Dados para os Novos Gráficos ---
-            # Dados da Curva de Potência
-            eficiencia_bomba_curve = func_curva_eficiencia(vazao_range) / 100
-            np.place(eficiencia_bomba_curve, eficiencia_bomba_curve <= 0, 1e-6) # Evitar divisão por zero
+            eficiencia_bomba_curve = np.clip(func_curva_eficiencia(vazao_range) / 100, 0.01, 1.0)
             potencia_eletrica_kw_curve = (vazao_range / 3600 * rho_selecionado * 9.81 * altura_bomba_curve) / (eficiencia_bomba_curve * (rend_motor / 100)) / 1000
-
-            # Dados da Curva de NPSH
             npshr_curve = func_curva_npshr(vazao_range)
             perdas_succao_curve = np.array([calcular_perda_serie(sistema_succao_atual, q, st.session_state.fluido_selecionado, materiais_combinados, fluidos_combinados) for q in vazao_range])
             npsha_curve = h_superficie_m + st.session_state.h_estatica_succao - perdas_succao_curve - h_vapor_m
-            
-            # --- Layout dos Novos Gráficos ---
             col1, col2 = st.columns(2)
-            
             with col1:
                 st.subheader("🔌 Análise de Potência")
                 fig_potencia, ax_potencia = plt.subplots(figsize=(8, 5))
                 ax_potencia.plot(vazao_range, potencia_eletrica_kw_curve, label='Potência Elétrica Consumida', color='purple', lw=2)
                 ax_potencia.axvline(x=vazao_op, color='red', linestyle='--', label=f'Operação ({vazao_op:.1f} m³/h)')
                 ax_potencia.scatter(vazao_op, resultados_energia['potencia_eletrica_kW'], color='red', s=100, zorder=5)
-                ax_potencia.set_title("Potência Elétrica vs. Vazão")
-                ax_potencia.set_xlabel("Vazão (m³/h)")
-                ax_potencia.set_ylabel("Potência Elétrica (kW)")
-                ax_potencia.legend(); ax_potencia.grid(True); ax_potencia.set_ylim(bottom=0)
+                ax_potencia.set_title("Potência Elétrica vs. Vazão"); ax_potencia.set_xlabel("Vazão (m³/h)"); ax_potencia.set_ylabel("Potência Elétrica (kW)"); ax_potencia.legend(); ax_potencia.grid(True); ax_potencia.set_ylim(bottom=0)
                 st.pyplot(fig_potencia)
                 plt.close(fig_potencia)
-
             with col2:
                 st.subheader("⚠️ Análise de Cavitação (NPSH)")
                 fig_npsh, ax_npsh = plt.subplots(figsize=(8, 5))
@@ -584,15 +565,10 @@ if st.session_state.get("authentication_status"):
                 ax_npsh.plot(vazao_range, npshr_curve, label='NPSH Requerido (NPSHr)', color='darkorange', lw=2)
                 ax_npsh.fill_between(vazao_range, npsha_curve, npshr_curve, where=(npsha_curve > npshr_curve), color='green', alpha=0.3, interpolate=True, label='Margem de Segurança')
                 ax_npsh.axvline(x=vazao_op, color='red', linestyle='--', label=f'Operação ({vazao_op:.1f} m³/h)')
-                ax_npsh.scatter(vazao_op, npsha_op, color='darkcyan', s=100, zorder=5)
-                ax_npsh.scatter(vazao_op, npshr_op, color='darkorange', s=100, zorder=5)
-                ax_npsh.set_title("NPSH vs. Vazão")
-                ax_npsh.set_xlabel("Vazão (m³/h)")
-                ax_npsh.set_ylabel("Altura (m)")
-                ax_npsh.legend(); ax_npsh.grid(True); ax_npsh.set_ylim(bottom=0)
+                ax_npsh.scatter(vazao_op, npsha_op, color='darkcyan', s=100, zorder=5); ax_npsh.scatter(vazao_op, npshr_op, color='darkorange', s=100, zorder=5)
+                ax_npsh.set_title("NPSH vs. Vazão"); ax_npsh.set_xlabel("Vazão (m³/h)"); ax_npsh.set_ylabel("Altura (m)"); ax_npsh.legend(); ax_npsh.grid(True); ax_npsh.set_ylim(bottom=0)
                 st.pyplot(fig_npsh)
                 plt.close(fig_npsh)
-
             st.divider()
             st.header("📄 Exportar Relatório")
             params_data = {
@@ -614,12 +590,12 @@ if st.session_state.get("authentication_status"):
             fig_curvas.savefig(chart_buffer, format='PNG', dpi=300, bbox_inches='tight')
             chart_buffer.seek(0)
             network_data_completa = {'succao': sistema_succao_atual, 'recalque': sistema_recalque_atual}
+            # ATENÇÃO: A função generate_report precisará ser atualizada para receber os novos gráficos
             pdf_bytes = generate_report(project_name=st.session_state.get("selected_project", "N/A"), scenario_name=st.session_state.get("selected_scenario", "N/A"), params_data=params_data, results_data=results_data, metrics_data=metrics_data, network_data=network_data_completa, diagram_image_bytes=diagrama_bytes, chart_figure_bytes=chart_buffer.getvalue())
             st.download_button(label="📥 Baixar Relatório em PDF", data=pdf_bytes, file_name=f"Relatorio_{st.session_state.get('selected_project', 'NovoProjeto')}_{st.session_state.get('selected_scenario', 'NovoCenario')}.pdf", mime="application/pdf")
             st.divider()
             st.header("🗺️ Diagrama da Rede"); st.graphviz_chart(diagrama_obj)
             st.divider()
-            # O gráfico principal já foi exibido acima
             st.header("📈 Análise de Sensibilidade de Custo por Diâmetro")
             escala_range = st.slider("Fator de Escala para Diâmetros (%)", 50, 200, (80, 120), key="sensibilidade_slider")
             params_equipamentos_sens = {'eficiencia_bomba_percent': eficiencia_op, 'eficiencia_motor_percent': rend_motor, 'horas_dia': horas_por_dia, 'custo_kwh': tarifa_energia, 'fluido_selecionado': st.session_state.fluido_selecionado}
