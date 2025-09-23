@@ -543,21 +543,18 @@ if st.session_state.get("authentication_status"):
             st.pyplot(fig_curvas)
             plt.close(fig_curvas)
             st.divider()
-            
-            # --- Início do Bloco Corrigido ---
-            # Dados da Curva de Potência
-            eficiencia_bomba_curve = func_curva_eficiencia(vazao_range) / 100
-            # Onde a eficiência extrapolada for irreal (menor ou igual a 1%), substituímos por 'NaN'
-            eficiencia_bomba_curve[eficiencia_bomba_curve <= 0.01] = np.nan
-            # Agora calculamos a potência. Onde a eficiência for NaN, a potência também será NaN e não será plotada.
-            potencia_eletrica_kw_curve = (vazao_range / 3600 * rho_selecionado * 9.81 * altura_bomba_curve) / (eficiencia_bomba_curve * (rend_motor / 100)) / 1000
 
-            # Dados da Curva de NPSH
+            # --- Início do Bloco Corrigido ---
+            eficiencia_bomba_curve = func_curva_eficiencia(vazao_range)
+            # Onde a eficiência extrapolada for irreal (menor ou igual a 1%), substituímos por 'NaN'
+            eficiencia_bomba_curve[eficiencia_bomba_curve <= 1.0] = np.nan 
+            # Agora calculamos a potência. Onde a eficiência for NaN, a potência também será NaN e não será plotada.
+            potencia_eletrica_kw_curve = (vazao_range / 3600 * rho_selecionado * 9.81 * altura_bomba_curve) / ((eficiencia_bomba_curve / 100) * (rend_motor / 100)) / 1000
+
             npshr_curve = func_curva_npshr(vazao_range)
             perdas_succao_curve = np.array([calcular_perda_serie(sistema_succao_atual, q, st.session_state.fluido_selecionado, materiais_combinados, fluidos_combinados) for q in vazao_range])
             npsha_curve = h_superficie_m + st.session_state.h_estatica_succao - perdas_succao_curve - h_vapor_m
             
-            # --- Layout dos Novos Gráficos ---
             col1, col2 = st.columns(2)
             
             with col1:
@@ -585,8 +582,6 @@ if st.session_state.get("authentication_status"):
 
             st.divider()
             st.header("📄 Exportar Relatório")
-            # ... (O resto do código continua como antes) ...
-
             params_data = {
                 "Fluido Selecionado": st.session_state.fluido_selecionado, "Altura Estática Total (m)": f"{h_estatica_total:.2f}", "Condição Final": st.session_state.endpoint_type,
             }
