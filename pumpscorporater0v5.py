@@ -289,7 +289,8 @@ if st.session_state.get("authentication_status"):
     if 'curva_altura_df' not in st.session_state:
         st.session_state.curva_altura_df = pd.DataFrame([{"Vazão (m³/h)": 0, "Altura (m)": 40}, {"Vazão (m³/h)": 50, "Altura (m)": 35}, {"Vazão (m³/h)": 100, "Altura (m)": 25}])
     if 'curva_eficiencia_df' not in st.session_state:
-        st.session_state.curva_eficiencia_df = pd.DataFrame([{"Vazão (m³/h)": 0, "Eficiência (%)": 0}, {"Vazão (m³/h)": 50, "Eficiência (%)": 70}, {"Vazão (m³/h)": 100, "Eficiência (%)": 65}])
+        # *** VALOR PADRÃO DA EFICIÊNCIA EM Q=0 ATUALIZADO PARA 50% ***
+        st.session_state.curva_eficiencia_df = pd.DataFrame([{"Vazão (m³/h)": 0, "Eficiência (%)": 50}, {"Vazão (m³/h)": 50, "Eficiência (%)": 70}, {"Vazão (m³/h)": 100, "Eficiência (%)": 65}])
     if 'curva_npshr_df' not in st.session_state:
         st.session_state.curva_npshr_df = pd.DataFrame([{"Vazão (m³/h)": 0, "NPSHr (m)": 2}, {"Vazão (m³/h)": 50, "NPSHr (m)": 3}, {"Vazão (m³/h)": 100, "NPSHr (m)": 5}])
     if 'fluido_selecionado' not in st.session_state: st.session_state.fluido_selecionado = "Água a 20°C"
@@ -531,30 +532,57 @@ if st.session_state.get("authentication_status"):
             st.metric("Custo Anual", f"R$ {resultados_energia['custo_anual']:.2f}")
             st.divider()
             st.header("📈 Gráficos de Análise Operacional")
-            max_vazao_curva = st.session_state.curva_altura_df['Vazão (m³/h)'].max()
-            max_plot_vazao = max(vazao_op * 1.5, max_vazao_curva * 1.2) if vazao_op else max_vazao_curva * 1.2
-            vazao_range = np.linspace(0, max_plot_vazao, 100)
+            
+            # --- INÍCIO DO BLOCO DE VISUALIZAÇÃO CORRIGIDO ---
+
+            # Determinar a faixa de vazão confiável com base nos dados do usuário
+            min_q_confiavel = st.session_state.curva_altura_df['Vazão (m³/h)'].min()
+            max_q_confiavel = st.session_state.curva_altura_df['Vazão (m³/h)'].max()
+            
+            max_plot_vazao = max(vazao_op * 1.5, max_q_confiavel * 1.2) if vazao_op else max_q_confiavel * 1.2
+            vazao_range = np.linspace(0, max_plot_vazao, 200)
+
+            # Máscaras para separar dados de interpolação e extrapolação
+            mask_confiavel = (vazao_range >= min_q_confiavel) & (vazao_range <= max_q_confiavel)
+
+            # --- Gráfico Principal: Curva da Bomba vs. Sistema ---
             fig_curvas, ax_curvas = plt.subplots(figsize=(8, 5))
-            label_ponto_op = f'Ponto de Operação ({vazao_op:.1f} m³/h, {altura_op:.1f} m)'
             altura_bomba_curve = func_curva_bomba(vazao_range)
             altura_sistema_curve = np.array([func_curva_sistema(q) if func_curva_sistema(q) < 1e10 else np.nan for q in vazao_range])
-            ax_curvas.plot(vazao_range, altura_bomba_curve, label='Curva da Bomba', color='royalblue', lw=2); ax_curvas.plot(vazao_range, altura_sistema_curve, label='Curva do Sistema', color='seagreen', lw=2); ax_curvas.scatter(vazao_op, altura_op, color='red', s=100, zorder=5, label=label_ponto_op)
+            
+            # Plotar a curva do sistema (sempre sólida)
+            ax_curvas.plot(vazao_range, altura_sistema_curve, label='Curva do Sistema', color='seagreen', lw=2)
+            
+            # Plotar a curva da bomba com estilos diferentes
+            ax_curvas.plot(vazao_range, altura_bomba_curve, color='royalblue', linestyle='--', alpha=0.5, lw=2, label='Curva da Bomba (Extrapolada)')
+            ax_curvas.plot(vazao_range[mask_confiavel], altura_bomba_curve[mask_confiavel], color='royalblue', linestyle='-', lw=2, label='Curva da Bomba (Dados)')
+            
+            # Ponto de Operação
+            label_ponto_op = f'Ponto de Operação ({vazao_op:.1f} m³/h, {altura_op:.1f} m)'
+            ax_curvas.scatter(vazao_op, altura_op, color='red', s=100, zorder=5, label=label_ponto_op)
+            
             ax_curvas.set_title("Curva da Bomba vs. Curva do Sistema"); ax_curvas.set_xlabel("Vazão (m³/h)"); ax_curvas.set_ylabel("Altura Manométrica (m)"); ax_curvas.legend(); ax_curvas.grid(True); ax_curvas.set_ylim(bottom=0)
             st.pyplot(fig_curvas)
             plt.close(fig_curvas)
             st.divider()
 
-            # --- Início do Bloco Corrigido ---
+            # --- Geração dos Dados para os Novos Gráficos ---
+            min_q_eff_confiavel = st.session_state.curva_eficiencia_df['Vazão (m³/h)'].min()
+            max_q_eff_confiavel = st.session_state.curva_eficiencia_df['Vazão (m³/h)'].max()
+            mask_confiavel_eff = (vazao_range >= min_q_eff_confiavel) & (vazao_range <= max_q_eff_confiavel)
+            
+            # Dados da Curva de Potência
             eficiencia_bomba_curve = func_curva_eficiencia(vazao_range)
-            # Onde a eficiência extrapolada for irreal (menor ou igual a 1%), substituímos por 'NaN'
-            eficiencia_bomba_curve[eficiencia_bomba_curve <= 1.0] = np.nan 
-            # Agora calculamos a potência. Onde a eficiência for NaN, a potência também será NaN e não será plotada.
+            eficiencia_bomba_curve[~mask_confiavel_eff] = np.nan # Define como NaN fora da faixa de confiança
+            eficiencia_bomba_curve[eficiencia_bomba_curve <= 1.0] = np.nan # Remove valores irreais mesmo dentro da faixa
             potencia_eletrica_kw_curve = (vazao_range / 3600 * rho_selecionado * 9.81 * altura_bomba_curve) / ((eficiencia_bomba_curve / 100) * (rend_motor / 100)) / 1000
 
+            # Dados da Curva de NPSH
             npshr_curve = func_curva_npshr(vazao_range)
             perdas_succao_curve = np.array([calcular_perda_serie(sistema_succao_atual, q, st.session_state.fluido_selecionado, materiais_combinados, fluidos_combinados) for q in vazao_range])
             npsha_curve = h_superficie_m + st.session_state.h_estatica_succao - perdas_succao_curve - h_vapor_m
             
+            # --- Layout dos Novos Gráficos ---
             col1, col2 = st.columns(2)
             
             with col1:
@@ -571,7 +599,8 @@ if st.session_state.get("authentication_status"):
                 st.subheader("⚠️ Análise de Cavitação (NPSH)")
                 fig_npsh, ax_npsh = plt.subplots(figsize=(8, 5))
                 ax_npsh.plot(vazao_range, npsha_curve, label='NPSH Disponível (NPSHa)', color='darkcyan', lw=2)
-                ax_npsh.plot(vazao_range, npshr_curve, label='NPSH Requerido (NPSHr)', color='darkorange', lw=2)
+                ax_npsh.plot(vazao_range, npshr_curve, color='darkorange', linestyle='--', alpha=0.7, lw=2, label='NPSHr (Extrapolado)')
+                ax_npsh.plot(vazao_range[mask_confiavel], npshr_curve[mask_confiavel], color='darkorange', linestyle='-', lw=2, label='NPSHr (Dados)')
                 ax_npsh.fill_between(vazao_range, npsha_curve, npshr_curve, where=(npsha_curve > npshr_curve), color='green', alpha=0.3, interpolate=True, label='Margem de Segurança')
                 ax_npsh.axvline(x=vazao_op, color='red', linestyle='--', label=f'Operação ({vazao_op:.1f} m³/h)')
                 ax_npsh.scatter(vazao_op, npsha_op, color='darkcyan', s=100, zorder=5); ax_npsh.scatter(vazao_op, npshr_op, color='darkorange', s=100, zorder=5)
